@@ -1,0 +1,12 @@
+state.json
+.cache/
+data/
+__pycache__/
+*.pyc
+
+
+
+
+# state.json is used to store the last ingested date, so that we can run this script daily and only fetch new data.
+# /data folder will also be ignored due size of big data. Will research how to use Git LFS in the future.
+# .cache/ is used by requests_cache to store cached responses, so that we don't have to hit the API every time we run the script.
