@@ -17,10 +17,12 @@ retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
 openmeteo = openmeteo_requests.Client(session=retry_session)
 
 AQ_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
+WEATHER_URL = "https://archive-api.open-meteo.com/v1/archive" #added by rparaula to implement open meteo's weather API
 
 MAX_WEIGHT_PER_MIN = 600.0
 WINDOW_SECONDS = 60
 
+# Remember these are for ARCHIVE endpoints, forecast endpoints will be implemented later
 
 HOURLY_VARS = [
     "us_aqi",
@@ -41,6 +43,20 @@ HOURLY_VARS = [
     "mugwort_pollen",
     "olive_pollen",
     "ragweed_pollen"
+]
+
+WEATHER_HOURLY_VARS = [
+    "temperature_2m",        # Air temperature at 2 meters above ground
+    "relative_humidity_2m",  # Relative humidity at 2 meters above ground
+    "precipitation",         # Total precipitation (rain + snow) sum of the preceding hour
+    "wind_speed_10m",        # Wind speed at 10 meters above ground (standard level)
+    "wind_speed_100m",       # Wind speed at 100 meters above ground (archive-supported; replaces 80m/180m)
+    "wind_direction_10m",    # Wind direction at 10 meters above ground
+    "wind_direction_100m",   # Wind direction at 100 meters above ground (archive-supported; replaces 80m/180m)
+    "wind_gusts_10m",        # Wind gusts at 10 meters above ground (max of preceding hour)
+    "shortwave_radiation",   # Shortwave solar radiation as average of the preceding hour
+    "diffuse_radiation",     # Diffuse solar radiation as average of the preceding hour
+    "cloud_cover",           # Total cloud cover as an area fraction
 ]
 
 
@@ -161,6 +177,8 @@ def fetch_and_save_csv(
         output_file: Path,
         timezone: str,
         batch_size: int,
+        url: str, # Added by rparaula for dynamic open meteo queries
+        hourly_vars: list[str],
 ):
     first_write = True
 
@@ -173,7 +191,7 @@ def fetch_and_save_csv(
 
     for batch in chunked(loc_df, batch_size):
         req_weight = compute_request_weight(
-            num_vars=len(HOURLY_VARS),
+            num_vars=len(hourly_vars),
             days=days,
             locations=len(batch),
         )
@@ -183,13 +201,13 @@ def fetch_and_save_csv(
         params = {
             "latitude": batch["latitude"].tolist(),
             "longitude": batch["longitude"].tolist(),
-            "hourly": HOURLY_VARS,
+            "hourly": hourly_vars,
             "start_date": start_date,
             "end_date": end_date,
             "timezone": timezone,
         }
 
-        responses = openmeteo.weather_api(AQ_URL, params=params)
+        responses = openmeteo.weather_api(url, params=params)
 
         batch_frames = []
         for i, resp in enumerate(responses):
@@ -215,7 +233,7 @@ def fetch_and_save_csv(
             if "grid_id" in row.index:
                 data["grid_id"] = row["grid_id"]
 
-            for j, var in enumerate(HOURLY_VARS):
+            for j, var in enumerate(hourly_vars):
                 data[var] = hourly.Variables(j).ValuesAsNumpy()
 
             batch_frames.append(pd.DataFrame(data))
@@ -257,6 +275,7 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(exist_ok=True)
     output_file = out_dir / f"{args.out_prefix}_air_quality_hourly_{timestamp}.csv"
+    output_file_weather = out_dir / f"{args.out_prefix}_weather_hourly_{timestamp}.csv" # added by rparaula to create output file for weather data
 
     loc_df = build_bbox_loc_df(
         lat_min=args.lat_min,
@@ -268,8 +287,11 @@ def main():
         state_tag="TX",
     )
 
+    # added by rparaula to implement separate batch size computation for air quality and weather variables, since they have different variable counts and thus different weights
     safe_bs = compute_safe_batch_size(HOURLY_VARS, args.start_date, args.end_date)
+    safe_bs_weather = compute_safe_batch_size(WEATHER_HOURLY_VARS, args.start_date, args.end_date) # added by rparaula to compute safe batch size for weather variables
     batch_size = min(args.batch_size, safe_bs)
+    batch_size_weather = min(args.batch_size, safe_bs_weather) # added by rparaula to compute batch size for weather variables
 
     print(
         f"bbox=({args.lat_min},{args.lon_min})..({args.lat_max},{args.lon_max}) "
@@ -284,8 +306,21 @@ def main():
         output_file=output_file,
         timezone=args.timezone,
         batch_size=batch_size,
+        url=AQ_URL,
+        hourly_vars=HOURLY_VARS,
     )
 
+    # second pass to fetch weather data for the same locations and time range, using the same batching and rate limiting logic
+    fetch_and_save_csv(
+        loc_df=loc_df,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        output_file=output_file_weather,
+        timezone=args.timezone,
+        batch_size=batch_size_weather,
+        url=WEATHER_URL,
+        hourly_vars=WEATHER_HOURLY_VARS,
+    )
 
 if __name__ == "__main__":
     main()
