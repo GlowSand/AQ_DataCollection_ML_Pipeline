@@ -53,9 +53,18 @@ def get_frs_data(zip: int, pgm_sys_acrnm:str):
     else:
         print(f"Failed to fetch data: {response.status_code} - {response.text}")
 
- 
-# Need to define what exactly counts as a "pollution source" using the FRS programs.
-# If we implement this method, we will definetly need web enrichment.   
+"""
+Need to define what exactly counts as a "pollution source" using the FRS programs.
+FRS programs I've noted of interest include...
+AIR - Air Emissions
+AIRS/AFS - Air Facility System
+RCR - Resource Conservation and Recovery Act (hazardous waste)
+EIS - Emissions Inventory System
+NEI - National Emissions Inventory
+TRIS - Toxics Release Inventory System
+
+If we implement this method, we will definetly need web enrichment.   
+"""
 
 def main():
     ZIP = 60085
