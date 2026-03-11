@@ -3,6 +3,8 @@ state.json
 data/
 __pycache__/
 *.pyc
+venv/
+.venv/
 
 
 
