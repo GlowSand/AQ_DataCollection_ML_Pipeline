@@ -138,7 +138,7 @@ def main():
     
     
     
-    loc_df = get_state_zips(args.state, args.uszips)
+    loc_df = get_zip_centroids("Houston", "TX", args.uszips)
     if loc_df.empty:
         raise SystemExit(f"No ZIP codes found for state: {args.state}")
     
