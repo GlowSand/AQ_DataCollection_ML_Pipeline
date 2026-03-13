@@ -2,6 +2,7 @@
 import argparse
 from datetime import datetime
 from pathlib import Path
+from metadata_tracker import PipelineRunTracker
 import time
 from collections import deque
 import pandas as pd
@@ -278,15 +279,20 @@ def main():
     output_file = out_dir / f"{args.out_prefix}_air_quality_hourly_{timestamp}.csv"
     output_file_weather = out_dir / f"{args.out_prefix}_weather_hourly_{timestamp}.csv" # added by rparaula to create output file for weather data
 
+    tracker = PipelineRunTracker(out_dir=out_dir)
+    tracker.start(args)
+
     pairs = parse_city_state_list(args.cities)
 
     # Load ZIPs for each city/state and combine
     all_frames = []
+    skipped_cities = []
     for city, st in pairs:
         sub = get_zip_centroids(city, st, uszips_csv_path=args.uszips)
 
         if sub.empty:
             print(f"WARNING: No ZIP centroids found for the city: {city} in the state: {st}. Skipping gracefully...")
+            skipped_cities.append(f"{city},{st}")
             continue
 
         sub["city"] = city
@@ -294,9 +300,11 @@ def main():
         all_frames.append(sub)
 
     if not all_frames:
+        tracker.finish(status="error", error="No ZIP centroids found for all provided cities and states.")
         raise SystemExit("No ZIP centroids found for all provided cities and states.")
 
     loc_df = pd.concat(all_frames, ignore_index=True)
+    tracker.record_locations(loc_df, skipped_cities)
 
     if args.zip_traffic:
         traffic_df = pd.read_csv(args.zip_traffic)
@@ -314,28 +322,36 @@ def main():
 
    
 
-    fetch_and_save_csv(
-        loc_df=loc_df,
-        start_date=args.start_date,
-        end_date=args.end_date,
-        output_file=output_file,
-        timezone=args.timezone,
-        batch_size=batch_size,
-        url=AQ_URL,
-        hourly_vars=HOURLY_VARS,
-    )
+    try:
+        fetch_and_save_csv(
+            loc_df=loc_df,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            output_file=output_file,
+            timezone=args.timezone,
+            batch_size=batch_size,
+            url=AQ_URL,
+            hourly_vars=HOURLY_VARS,
+        )
+        tracker.record_output("air_quality", output_file, HOURLY_VARS, AQ_URL, batch_size)
 
-    # second pass to fetch weather data for the same locations and time range, using the same batching and rate limiting logic
-    fetch_and_save_csv(
-        loc_df=loc_df,
-        start_date=args.start_date,
-        end_date=args.end_date,
-        output_file=output_file_weather,
-        timezone=args.timezone,
-        batch_size=batch_size_weather,
-        url=WEATHER_URL,
-        hourly_vars=WEATHER_HOURLY_VARS,
-    )
+        # second pass to fetch weather data for the same locations and time range, using the same batching and rate limiting logic
+        fetch_and_save_csv(
+            loc_df=loc_df,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            output_file=output_file_weather,
+            timezone=args.timezone,
+            batch_size=batch_size_weather,
+            url=WEATHER_URL,
+            hourly_vars=WEATHER_HOURLY_VARS,
+        )
+        tracker.record_output("weather", output_file_weather, WEATHER_HOURLY_VARS, WEATHER_URL, batch_size_weather)
+
+        tracker.finish(status="success")
+    except Exception as e:
+        tracker.finish(status="error", error=str(e))
+        raise
 
 if __name__ == "__main__":
     main()
