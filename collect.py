@@ -279,8 +279,9 @@ def main():
     output_file = out_dir / f"{args.out_prefix}_air_quality_hourly_{timestamp}.csv"
     output_file_weather = out_dir / f"{args.out_prefix}_weather_hourly_{timestamp}.csv" # added by rparaula to create output file for weather data
 
+    # Initialize the metadata tracker and log the start of this pipeline run, including the input parameters and which script is running.
     tracker = PipelineRunTracker(out_dir=out_dir)
-    tracker.start(args)
+    tracker.start(args, script="collect")
 
     pairs = parse_city_state_list(args.cities)
 
@@ -292,7 +293,7 @@ def main():
 
         if sub.empty:
             print(f"WARNING: No ZIP centroids found for the city: {city} in the state: {st}. Skipping gracefully...")
-            skipped_cities.append(f"{city},{st}")
+            skipped_cities.append(f"{city},{st}") # skipped cities are now saved to a list and will be recorded in the metadata log, added by rparaula
             continue
 
         sub["city"] = city
@@ -300,11 +301,11 @@ def main():
         all_frames.append(sub)
 
     if not all_frames:
-        tracker.finish(status="error", error="No ZIP centroids found for all provided cities and states.")
+        tracker.finish(status="error", error="No ZIP centroids found for all provided cities and states.") # added by rparaula to log error in metadata if no ZIP centroids found for any provided city/state pairs
         raise SystemExit("No ZIP centroids found for all provided cities and states.")
 
     loc_df = pd.concat(all_frames, ignore_index=True)
-    tracker.record_locations(loc_df, skipped_cities)
+    tracker.record_locations(loc_df, skipped_cities) # added by rparaula to log which cities we skipped and which we found in the metadata log, this is important for transparency and debugging, especially if some of the provided city/state pairs had no ZIP centroids and were skipped
 
     if args.zip_traffic:
         traffic_df = pd.read_csv(args.zip_traffic)
@@ -321,7 +322,13 @@ def main():
     batch_size_weather = min(args.batch_size, safe_bs_weather) # added by rparaula to compute batch size for weather variables
 
    
-
+    """
+    Modified by rparaula to be wrapped in try/except so that we can log any exceptions that occur during the data fetching to the metadata log with a status of "error" and the error message, 
+    
+    So instead of just crashing without any record of what went wrong. We can get info on which runs failed and why.
+    
+    """
+    
     try:
         fetch_and_save_csv(
             loc_df=loc_df,
@@ -333,7 +340,7 @@ def main():
             url=AQ_URL,
             hourly_vars=HOURLY_VARS,
         )
-        tracker.record_output("air_quality", output_file, HOURLY_VARS, AQ_URL, batch_size)
+        tracker.record_output("air_quality", output_file, HOURLY_VARS, AQ_URL, batch_size) #added by rparaula to log the details of the air quality data fetching to the metadata log, including which variables we fetched, which API endpoint we used, and what batch size we used
 
         # second pass to fetch weather data for the same locations and time range, using the same batching and rate limiting logic
         fetch_and_save_csv(
@@ -346,8 +353,9 @@ def main():
             url=WEATHER_URL,
             hourly_vars=WEATHER_HOURLY_VARS,
         )
-        tracker.record_output("weather", output_file_weather, WEATHER_HOURLY_VARS, WEATHER_URL, batch_size_weather)
+        tracker.record_output("weather", output_file_weather, WEATHER_HOURLY_VARS, WEATHER_URL, batch_size_weather) # added by rparaula to log the details of the weather data fetching to the metadata log, including which variables we fetched, which API endpoint we used, and what batch size we used
 
+        # added by rparaula to log the status of the run within metadata tracker
         tracker.finish(status="success")
     except Exception as e:
         tracker.finish(status="error", error=str(e))

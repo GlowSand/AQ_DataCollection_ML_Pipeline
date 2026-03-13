@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import requests
 import json5
+from metadata_tracker import PipelineRunTracker
 
 FRS_URL = "https://ofmpub.epa.gov/frs_public2/frs_rest_services.get_facilities"
 
@@ -135,27 +136,35 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(exist_ok=True)
     output_file = out_dir / f"{args.out_prefix}_{args.state}_{timestamp}.csv"
-    
-    
-    
+
+    tracker = PipelineRunTracker(out_dir=out_dir)
+    tracker.start(args, script="dump_pollution_sources")
+
     loc_df = get_zip_centroids("Houston", "TX", args.uszips)
     if loc_df.empty:
+        tracker.finish(status="error", error=f"No ZIP codes found for state: {args.state}")
         raise SystemExit(f"No ZIP codes found for state: {args.state}")
-    
-    
-    
-    first_write = True
-    for _, row in loc_df.iterrows():
-        zip_code = int(row["zip"])
-        df = get_zip_pollution_sources(zip_code)
-        if not df.empty:
-            df.to_csv(output_file, mode="a", header=first_write, index=False)
-            first_write = False
-            print(f"ZIP {zip_code}: {len(df)} facilities written.")
-        else:
-            print(f"ZIP {zip_code}: no pollution sources found.")
 
-    print(f"\nDONE: saved to {output_file}")
+    tracker.record_locations(loc_df, skipped_cities=[], cities_found=["Houston,TX"])
+
+    try:
+        first_write = True
+        for _, row in loc_df.iterrows():
+            zip_code = int(row["zip"])
+            df = get_zip_pollution_sources(zip_code)
+            if not df.empty:
+                df.to_csv(output_file, mode="a", header=first_write, index=False)
+                first_write = False
+                print(f"ZIP {zip_code}: {len(df)} facilities written.")
+            else:
+                print(f"ZIP {zip_code}: no pollution sources found.")
+
+        print(f"\nDONE: saved to {output_file}")
+        tracker.record_output("pollution_sources", output_file, POLLUTION_SOURCE_PROGRAMS, FRS_URL, args.batch_size)
+        tracker.finish(status="success")
+    except Exception as e:
+        tracker.finish(status="error", error=str(e))
+        raise
 
 if __name__ == "__main__":
     main()

@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 import osmnx as ox
 import numpy as np
+from metadata_tracker import PipelineRunTracker
 
 ox.settings.use_cache = True
 ox.settings.log_console = False
@@ -110,27 +111,58 @@ def main():
     out_dir.mkdir(exist_ok=True)
     output_file = out_dir / f"{args.out_prefix}_{args.radius_m}m_{timestamp}.csv"
 
+
+    """ added by rparaula to initialize the metadata tracker, 
+    this will create a new record for this pipeline run and save the start time, input parameters, and script name to the metadata log, 
+    """
+    tracker = PipelineRunTracker(out_dir=out_dir)
+    tracker.start(args, script="dump_zip_road_density")
+
     pairs = parse_city_state_list(args.cities)
 
+    """
+    Modified by rparaula to where "citied_found" is coomputed manuallly by filtering the pairs list against the skipped_cities list. 
+    
+    This way we have an explicit record of which cities we found ZIP centroids for and which we skipped due to no ZIP centroids found.
+    """
+    
     all_frames = []
+    skipped_cities = []
     for city, st in pairs:
         sub = get_zip_centroids(city, st, uszips_csv_path=args.uszips)
         if sub.empty:
             print(f"WARNING: No ZIP centroids found for the city: {city} in the state: {st}. Skipping gracefully...")
+            skipped_cities.append(f"{city},{st}")
             continue
         all_frames.append(sub)
 
     if not all_frames:
+        tracker.finish(status="error", error="No ZIP centroids found for all provided cities and states.")
         raise SystemExit("No ZIP centroids found for all provided cities and states.")
 
     loc_df = pd.concat(all_frames, ignore_index=True)
+    cities_found = [f"{city},{st}" for city, st in pairs if f"{city},{st}" not in skipped_cities]
+    tracker.record_locations(loc_df, skipped_cities, cities_found=cities_found)
 
-    dump_zip_road_density(
-        loc_df=loc_df,
-        output_file=output_file,
-        radius_m=args.radius_m,
-        batch_size=args.batch_size,
-    )
+    # Modified by rparaula too have the dump_zip_road_density call to be wrapped in a try/except call too log any exceptions/errors.
+    try:
+        dump_zip_road_density(
+            loc_df=loc_df,
+            output_file=output_file,
+            radius_m=args.radius_m,
+            batch_size=args.batch_size,
+        )
+        tracker.record_output(
+            "road_density",
+            output_file,
+            [f"road_len_m_{args.radius_m}"],
+            "OpenStreetMap/OSMnx",
+            args.batch_size,
+        )
+        tracker.finish(status="success")
+    except Exception as e:
+        tracker.finish(status="error", error=str(e))
+        raise
 
 
 if __name__ == "__main__":
