@@ -7,6 +7,8 @@ import pandas as pd
 import requests_cache
 from retry_requests import retry
 import openmeteo_requests
+import math
+import numpy as np
 
 import time
 from collections import deque
@@ -89,42 +91,109 @@ HOURLY_VARS = [
 ]
 
 
-# City schemas: "Austin,TX;Houston,TX"
-def parse_city_state_list(s: str):
-    pairs = []
-    for part in s.split(";"):
-        part = part.strip()
-        if not part:
-            continue
-        if "," not in part:
-            raise ValueError(f"Bad --cities entry '{part}'. Expected 'City,ST' (comma-separated).")
-        city, st = part.split(",", 1)
-        city = city.strip()
-        st = st.strip().upper()
-        if not city or not st:
-            raise ValueError(f"Bad --cities entry '{part}'. Expected 'City,ST'.")
-        pairs.append((city, st))
-    if not pairs:
-        raise ValueError("No valid city/state pairs provided in --cities.")
-    return pairs
+class WeightRateLimiter:
+    """
+    Sliding-window limiter: total weight over the last `window_seconds`
+    must not exceed `max_weight`.
+    """
+
+    def __init__(self, max_weight: float = 600.0, window_seconds: int = 60):
+        self.max_weight = float(max_weight)
+        self.window_seconds = int(window_seconds)
+        self.events = deque()  # (timestamp_monotonic, weight)
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - self.window_seconds
+        while self.events and self.events[0][0] <= cutoff:
+            self.events.popleft()
+
+    def used_weight(self) -> float:
+        now = time.monotonic()
+        self._prune(now)
+        return sum(w for _, w in self.events)
+
+    def acquire(self, weight: float) -> None:
+        weight = float(weight)
+        if weight <= 0:
+            return
+
+        while True:
+            now = time.monotonic()
+            self._prune(now)
+
+            used = sum(w for _, w in self.events)
+            if used + weight <= self.max_weight:
+                self.events.append((now, weight))
+                return
+
+            # Need to wait until enough weight expires from the window
+            # Compute minimal sleep based on earliest event(s).
+            # Simple strategy: sleep until the oldest event expires.
+            oldest_t, _ = self.events[0]
+            sleep_for = (oldest_t + self.window_seconds) - now
+            sleep_for = max(sleep_for, 0.01)
+            time.sleep(sleep_for)
 
 
-# Get the center lat/lon for a zip using data from https://simplemaps.com/data/us-zips
-def get_zip_centroids(city: str, state_id: str, uszips_csv_path: str) -> pd.DataFrame:
-    df = pd.read_csv(uszips_csv_path)
+def compute_request_weight(num_vars: int, days: int, locations: int) -> float:
+    per_loc = max(num_vars / 10.0, (num_vars / 10.0) * (days / 7.0))
+    return per_loc * locations
 
-    city_norm = city.strip().lower()
-    state_norm = state_id.strip().upper()
 
-    sub = df[
-        (df["city"].astype(str).str.strip().str.lower() == city_norm)
-        & (df["state_id"].astype(str).str.strip().str.upper() == state_norm)
-        ][["zip", "lat", "lng"]].copy()
+def build_latlon_grid(
+        lat_min: float, lat_max: float,
+        lon_min: float, lon_max: float,
+        step_deg: float = 0.02
+) -> pd.DataFrame:
+    # include endpoints with a tiny epsilon
+    lats = np.arange(lat_min, lat_max + 1e-12, step_deg)
+    lons = np.arange(lon_min, lon_max + 1e-12, step_deg)
 
-    sub = sub.rename(columns={"lat": "latitude", "lng": "longitude"})
-    sub = sub.dropna(subset=["latitude", "longitude"]).drop_duplicates(subset=["zip"]).reset_index(drop=True)
+    lat_grid, lon_grid = np.meshgrid(lats, lons, indexing="ij")
+    df = pd.DataFrame({
+        "lat": lat_grid.ravel(),
+        "lon": lon_grid.ravel(),
+    })
 
-    return sub
+    # stable id: rounded coordinates
+    df["grid_id"] = (
+            "lat=" + df["lat"].round(5).astype(str) +
+            "_lon=" + df["lon"].round(5).astype(str)
+    )
+    return df[["grid_id", "lat", "lon"]]
+
+
+def build_bbox_loc_df(lat_min: float, lat_max: float, lon_min: float, lon_max: float,
+                      step_deg: float = 0.02, city_tag: str = "grid", state_tag: str = "TX") -> pd.DataFrame:
+    g = build_latlon_grid(lat_min, lat_max, lon_min, lon_max, step_deg=step_deg)
+
+    loc_df = pd.DataFrame({
+        "city": city_tag,
+        "state": state_tag,
+        "zip": pd.NA,
+        "latitude": g["lat"].astype(float),
+        "longitude": g["lon"].astype(float),
+        "grid_id": g["grid_id"],
+    })
+    return loc_df
+
+
+def compute_safe_batch_size(hourly_vars: list[str], start_date: str, end_date: str,
+                            max_weight_per_min: int = 600, safety: float = 0.9) -> int:
+    """
+    Weight rule: weight = max(V/10, (V/10)*(days/7)) * locations
+    """
+    V = len(hourly_vars)
+
+    d0 = pd.to_datetime(start_date)
+    d1 = pd.to_datetime(end_date)
+    # Open-Meteo uses inclusive date ranges in many endpoints; treat as inclusive
+    days = int((d1 - d0).days) + 1
+    days = max(days, 1)
+
+    weight_per_location = max(V / 10.0, (V / 10.0) * (days / 7.0))
+    max_locations = (max_weight_per_min / weight_per_location) * safety
+    return max(1, int(math.floor(max_locations)))
 
 
 def chunked(df: pd.DataFrame, size: int):
@@ -160,9 +229,22 @@ def fetch_and_save_csv(
 ):
     first_write = True
 
-    has_traffic = "traffic_density" in loc_df.columns
+    limiter = WeightRateLimiter(max_weight=600.0, window_seconds=60)
+
+    d0 = pd.to_datetime(start_date)
+    d1 = pd.to_datetime(end_date)
+    days = int((d1 - d0).days) + 1
+    days = max(days, 1)
 
     for batch in chunked(loc_df, batch_size):
+        req_weight = compute_request_weight(
+            num_vars=len(HOURLY_VARS),
+            days=days,
+            locations=len(batch),
+        )
+
+        limiter.acquire(req_weight)
+
         params = {
             "latitude": batch["latitude"].tolist(),
             "longitude": batch["longitude"].tolist(),
@@ -189,17 +271,17 @@ def fetch_and_save_csv(
             ).tz_convert(timezone)
 
             row = batch.iloc[i]
+
             data = {
                 "city": row["city"],
                 "state": row["state"],
-                "zip": row["zip"],
                 "latitude": row["latitude"],
                 "longitude": row["longitude"],
                 "time": times,
             }
 
-            if has_traffic:
-                data["traffic_density"] = row["traffic_density"]
+            if "grid_id" in row.index:
+                data["grid_id"] = row["grid_id"]
 
             for j, var in enumerate(HOURLY_VARS):
                 data[var] = hourly.Variables(j).ValuesAsNumpy()
@@ -211,7 +293,7 @@ def fetch_and_save_csv(
         batch_df.to_csv(output_file, mode="a", header=first_write, index=False)
         first_write = False
 
-        print(f"Saved batch of {len(batch)} ZIPs -> {output_file.name}")
+        print(f"Saved batch of {len(batch)} locations -> {output_file.name}")
 
     print(f"\nDONE: saved to {output_file}")
 
@@ -220,21 +302,18 @@ def parse_args():
     p = argparse.ArgumentParser(
         description="Bulk historical air quality pull from Open-Meteo for all ZIP centroids in one or more City,ST pairs."
     )
-    p.add_argument(
-        "--cities",
-        required=True,
-        help='Semicolon-separated list like "Austin,TX;Houston,TX"',
-    )
     p.add_argument("--start-date", required=True, help="YYYY-MM-DD")
     p.add_argument("--end-date", required=True, help="YYYY-MM-DD")
+    p.add_argument("--lat-min", type=float, default=29.40, help="Bounding box south latitude (default Houston metro)")
+    p.add_argument("--lat-max", type=float, default=30.15, help="Bounding box north latitude (default Houston metro)")
+    p.add_argument("--lon-min", type=float, default=-95.90, help="Bounding box west longitude (default Houston metro)")
+    p.add_argument("--lon-max", type=float, default=-94.95, help="Bounding box east longitude (default Houston metro)")
+    p.add_argument("--step-deg", type=float, default=0.02, help="Grid step in degrees (0.01~1.1km, 0.02~2.2km)")
+    p.add_argument("--tag", default="grid", help="Label for city column when using grid sampling")
     p.add_argument("--timezone", default="America/Chicago", help="IANA timezone")
-    p.add_argument("--batch-size", type=int, default=50, help="ZIPs per API request (25-100 recommended)")
-    p.add_argument("--uszips", default="uszips.csv",
-                   help="Path to simplemaps uszips.csv, you can get this at https://simplemaps.com/data/us-zips")
-    p.add_argument("--zip-traffic", default=None,
-                   help="Optional: CSV with columns zip,traffic_density to augment features (your precomputed static file).")
     p.add_argument("--out-dir", default="data", help="Output directory")
     p.add_argument("--out-prefix", default="multi", help="Output filename prefix")
+    p.add_argument("--batch-size", type=int, default=40, help="Locations per API request (capped by weight rule)")
     return p.parse_args()
 
 
@@ -247,33 +326,24 @@ def main():
     out_dir.mkdir(exist_ok=True)
     output_file = out_dir / f"{args.out_prefix}_air_quality_hourly_{timestamp}.csv"
 
-    pairs = parse_city_state_list(args.cities)
+    loc_df = build_bbox_loc_df(
+        lat_min=args.lat_min,
+        lat_max=args.lat_max,
+        lon_min=args.lon_min,
+        lon_max=args.lon_max,
+        step_deg=args.step_deg,
+        city_tag="Houston",
+        state_tag="TX",
+    )
 
-    # Load ZIPs for each city/state and combine
-    all_frames = []
-    for city, st in pairs:
-        sub = get_zip_centroids(city, st, uszips_csv_path=args.uszips)
+    safe_bs = compute_safe_batch_size(HOURLY_VARS, args.start_date, args.end_date)
+    batch_size = min(args.batch_size, safe_bs)
 
-        if sub.empty:
-            print(f"WARNING: No ZIP centroids found for the city: {city} in the state: {st}. Skipping gracefully...")
-            continue
-
-        sub["city"] = city
-        sub["state"] = st
-        all_frames.append(sub)
-
-    if not all_frames:
-        raise SystemExit("No ZIP centroids found for all provided cities and states.")
-
-    loc_df = pd.concat(all_frames, ignore_index=True)
-
-    if args.zip_traffic:
-        traffic_df = pd.read_csv(args.zip_traffic)
-        if "zip" not in traffic_df.columns or "traffic_density" not in traffic_df.columns:
-            raise SystemExit("Your --zip-traffic file must have at least columns: zip, traffic_density")
-
-        traffic_df = traffic_df[["zip", "traffic_density"]].drop_duplicates(subset=["zip"])
-        loc_df = loc_df.merge(traffic_df, on="zip", how="left")
+    print(
+        f"bbox=({args.lat_min},{args.lon_min})..({args.lat_max},{args.lon_max}) "
+        f"step={args.step_deg} locations={len(loc_df)} vars={len(HOURLY_VARS)} "
+        f"safe_batch<={safe_bs} using_batch={batch_size}"
+    )
 
     safe_bs = compute_safe_batch_size(HOURLY_VARS, args.start_date, args.end_date)
     batch_size = min(args.batch_size, safe_bs)
