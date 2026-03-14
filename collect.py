@@ -2,11 +2,14 @@
 import argparse
 from datetime import datetime
 from pathlib import Path
-
+import math
 import pandas as pd
 import requests_cache
 from retry_requests import retry
 import openmeteo_requests
+
+import time
+from collections import deque
 
 # Open Meteo client setup
 cache_session = requests_cache.CachedSession(".cache", expire_after=3600)
@@ -14,6 +17,62 @@ retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
 openmeteo = openmeteo_requests.Client(session=retry_session)
 
 AQ_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
+
+MAX_WEIGHT_PER_MIN = 600.0
+WINDOW_SECONDS = 60
+
+
+class WeightRateLimiter:
+    """
+    Sliding-window limiter: total weight over the last `window_seconds`
+    must not exceed `max_weight`.
+    """
+
+    def __init__(self, max_weight: float = 600.0, window_seconds: int = 60):
+        self.max_weight = float(max_weight)
+        self.window_seconds = int(window_seconds)
+        self.events = deque()  # (timestamp_monotonic, weight)
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - self.window_seconds
+        while self.events and self.events[0][0] <= cutoff:
+            self.events.popleft()
+
+    def used_weight(self) -> float:
+        now = time.monotonic()
+        self._prune(now)
+        return sum(w for _, w in self.events)
+
+    def acquire(self, weight: float) -> None:
+        weight = float(weight)
+        if weight <= 0:
+            return
+
+        while True:
+            now = time.monotonic()
+            self._prune(now)
+
+            used = sum(w for _, w in self.events)
+            if used + weight <= self.max_weight:
+                self.events.append((now, weight))
+                return
+
+            # Need to wait until enough weight expires from the window
+            # Compute minimal sleep based on earliest event(s).
+            # Simple strategy: sleep until the oldest event expires.
+            oldest_t, _ = self.events[0]
+            sleep_for = (oldest_t + self.window_seconds) - now
+            sleep_for = max(sleep_for, 0.01)
+            time.sleep(sleep_for)
+
+
+limiter = WeightRateLimiter(MAX_WEIGHT_PER_MIN, WINDOW_SECONDS)
+
+
+def compute_request_weight(num_vars: int, days: int, locations: int) -> float:
+    per_loc = max(num_vars / 10.0, (num_vars / 10.0) * (days / 7.0))
+    return per_loc * locations
+
 
 HOURLY_VARS = [
     "us_aqi",
@@ -26,14 +85,7 @@ HOURLY_VARS = [
     "uv_index_clear_sky",
     "uv_index",
     "dust",
-    "aerosol_optical_depth",
-    "ammonia",
-    "alder_pollen",
-    "birch_pollen",
-    "grass_pollen",
-    "mugwort_pollen",
-    "olive_pollen",
-    "ragweed_pollen"
+    "aerosol_optical_depth"
 ]
 
 
@@ -80,6 +132,24 @@ def chunked(df: pd.DataFrame, size: int):
         yield df.iloc[i: i + size]
 
 
+def compute_safe_batch_size(hourly_vars: list[str], start_date: str, end_date: str,
+                            max_weight_per_min: int = 600, safety: float = 0.9) -> int:
+    """
+    Weight rule: weight = max(V/10, (V/10)*(days/7)) * locations
+    """
+    V = len(hourly_vars)
+
+    d0 = pd.to_datetime(start_date)
+    d1 = pd.to_datetime(end_date)
+    # Open-Meteo uses inclusive date ranges in many endpoints; treat as inclusive
+    days = int((d1 - d0).days) + 1
+    days = max(days, 1)
+
+    weight_per_location = max(V / 10.0, (V / 10.0) * (days / 7.0))
+    max_locations = (max_weight_per_min / weight_per_location) * safety
+    return max(1, int(math.floor(max_locations)))
+
+
 def fetch_and_save_csv(
         loc_df: pd.DataFrame,
         start_date: str,
@@ -102,6 +172,9 @@ def fetch_and_save_csv(
             "timezone": timezone,
         }
 
+        days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days + 1
+        weight = compute_request_weight(num_vars=len(HOURLY_VARS), days=days, locations=len(batch))
+        limiter.acquire(weight)
         responses = openmeteo.weather_api(AQ_URL, params=params)
 
         batch_frames = []
@@ -202,13 +275,16 @@ def main():
         traffic_df = traffic_df[["zip", "traffic_density"]].drop_duplicates(subset=["zip"])
         loc_df = loc_df.merge(traffic_df, on="zip", how="left")
 
+    safe_bs = compute_safe_batch_size(HOURLY_VARS, args.start_date, args.end_date)
+    batch_size = min(args.batch_size, safe_bs)
+
     fetch_and_save_csv(
         loc_df=loc_df,
         start_date=args.start_date,
         end_date=args.end_date,
         output_file=output_file,
         timezone=args.timezone,
-        batch_size=args.batch_size,
+        batch_size=batch_size,
     )
 
 
