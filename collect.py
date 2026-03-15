@@ -1,4 +1,3 @@
-# pip install requests_cache retry_requests openmeteo-requests pandas
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -17,7 +16,7 @@ retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
 openmeteo = openmeteo_requests.Client(session=retry_session)
 
 AQ_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
-WEATHER_URL = "https://archive-api.open-meteo.com/v1/archive" #added by rparaula to implement open meteo's weather API
+WEATHER_URL = "https://archive-api.open-meteo.com/v1/archive"  # added by rparaula to implement open meteo's weather API
 
 MAX_WEIGHT_PER_MIN = 600.0
 WINDOW_SECONDS = 60
@@ -36,28 +35,22 @@ HOURLY_VARS = [
     "uv_index",
     "dust",
     "aerosol_optical_depth",
-    "ammonia",
-    "alder_pollen",
-    "birch_pollen",
-    "grass_pollen",
-    "mugwort_pollen",
-    "olive_pollen",
-    "ragweed_pollen"
 ]
 
 WEATHER_HOURLY_VARS = [
-    "temperature_2m",        # Air temperature at 2 meters above ground
+    "temperature_2m",  # Air temperature at 2 meters above ground
     "relative_humidity_2m",  # Relative humidity at 2 meters above ground
-    "precipitation",         # Total precipitation (rain + snow) sum of the preceding hour
-    "wind_speed_10m",        # Wind speed at 10 meters above ground (standard level)
-    "wind_speed_100m",       # Wind speed at 100 meters above ground (archive-supported; replaces 80m/180m)
-    "wind_direction_10m",    # Wind direction at 10 meters above ground
-    "wind_direction_100m",   # Wind direction at 100 meters above ground (archive-supported; replaces 80m/180m)
-    "wind_gusts_10m",        # Wind gusts at 10 meters above ground (max of preceding hour)
-    "shortwave_radiation",   # Shortwave solar radiation as average of the preceding hour
-    "diffuse_radiation",     # Diffuse solar radiation as average of the preceding hour
-    "cloud_cover",           # Total cloud cover as an area fraction
+    "precipitation",  # Total precipitation (rain + snow) sum of the preceding hour
+    "wind_speed_10m",  # Wind speed at 10 meters above ground (standard level)
+    "wind_speed_100m",  # Wind speed at 100 meters above ground (archive-supported; replaces 80m/180m)
+    "wind_direction_10m",  # Wind direction at 10 meters above ground
+    "wind_direction_100m",  # Wind direction at 100 meters above ground (archive-supported; replaces 80m/180m)
+    "wind_gusts_10m",  # Wind gusts at 10 meters above ground (max of preceding hour)
+    "shortwave_radiation",  # Shortwave solar radiation as average of the preceding hour
+    "diffuse_radiation",  # Diffuse solar radiation as average of the preceding hour
+    "cloud_cover",  # Total cloud cover as an area fraction
 ]
+
 
 # City schemas: "Austin,TX;Houston,TX"
 def parse_city_state_list(s: str):
@@ -146,9 +139,6 @@ def compute_request_weight(num_vars: int, days: int, locations: int) -> float:
     return per_loc * locations
 
 
-
-# rparaula replaced everything above to reimplemnt zipcode-based logic
-
 def compute_safe_batch_size(hourly_vars: list[str], start_date: str, end_date: str,
                             max_weight_per_min: int = 600, safety: float = 0.9) -> int:
     """
@@ -179,7 +169,7 @@ def fetch_and_save_csv(
         output_file: Path,
         timezone: str,
         batch_size: int,
-        url: str, # Added by rparaula for dynamic open meteo queries
+        url: str,  # Added by rparaula for dynamic open meteo queries
         hourly_vars: list[str],
 ):
     first_write = True
@@ -247,6 +237,7 @@ def fetch_and_save_csv(
 
     print(f"\nDONE: saved to {output_file}")
 
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Bulk historical air quality pull from Open-Meteo for all ZIP centroids in one or more City,ST pairs."
@@ -277,7 +268,7 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(exist_ok=True)
     output_file = out_dir / f"{args.out_prefix}_air_quality_hourly_{timestamp}.csv"
-    output_file_weather = out_dir / f"{args.out_prefix}_weather_hourly_{timestamp}.csv" # added by rparaula to create output file for weather data
+    output_file_weather = out_dir / f"{args.out_prefix}_weather_hourly_{timestamp}.csv"  # added by rparaula to create output file for weather data
 
     # Initialize the metadata tracker and log the start of this pipeline run, including the input parameters and which script is running.
     tracker = PipelineRunTracker(out_dir=out_dir)
@@ -293,7 +284,8 @@ def main():
 
         if sub.empty:
             print(f"WARNING: No ZIP centroids found for the city: {city} in the state: {st}. Skipping gracefully...")
-            skipped_cities.append(f"{city},{st}") # skipped cities are now saved to a list and will be recorded in the metadata log, added by rparaula
+            skipped_cities.append(
+                f"{city},{st}")  # skipped cities are now saved to a list and will be recorded in the metadata log, added by rparaula
             continue
 
         sub["city"] = city
@@ -301,11 +293,13 @@ def main():
         all_frames.append(sub)
 
     if not all_frames:
-        tracker.finish(status="error", error="No ZIP centroids found for all provided cities and states.") # added by rparaula to log error in metadata if no ZIP centroids found for any provided city/state pairs
+        tracker.finish(status="error",
+                       error="No ZIP centroids found for all provided cities and states.")  # added by rparaula to log error in metadata if no ZIP centroids found for any provided city/state pairs
         raise SystemExit("No ZIP centroids found for all provided cities and states.")
 
     loc_df = pd.concat(all_frames, ignore_index=True)
-    tracker.record_locations(loc_df, skipped_cities) # added by rparaula to log which cities we skipped and which we found in the metadata log, this is important for transparency and debugging, especially if some of the provided city/state pairs had no ZIP centroids and were skipped
+    tracker.record_locations(loc_df,
+                             skipped_cities)  # added by rparaula to log which cities we skipped and which we found in the metadata log, this is important for transparency and debugging, especially if some of the provided city/state pairs had no ZIP centroids and were skipped
 
     if args.zip_traffic:
         traffic_df = pd.read_csv(args.zip_traffic)
@@ -317,18 +311,19 @@ def main():
 
     # added by rparaula to implement separate batch size computation for air quality and weather variables, since they have different variable counts and thus different weights
     safe_bs = compute_safe_batch_size(HOURLY_VARS, args.start_date, args.end_date)
-    safe_bs_weather = compute_safe_batch_size(WEATHER_HOURLY_VARS, args.start_date, args.end_date) # added by rparaula to compute safe batch size for weather variables
+    safe_bs_weather = compute_safe_batch_size(WEATHER_HOURLY_VARS, args.start_date,
+                                              args.end_date)  # added by rparaula to compute safe batch size for weather variables
     batch_size = min(args.batch_size, safe_bs)
-    batch_size_weather = min(args.batch_size, safe_bs_weather) # added by rparaula to compute batch size for weather variables
+    batch_size_weather = min(args.batch_size,
+                             safe_bs_weather)  # added by rparaula to compute batch size for weather variables
 
-   
     """
     Modified by rparaula to be wrapped in try/except so that we can log any exceptions that occur during the data fetching to the metadata log with a status of "error" and the error message, 
     
     So instead of just crashing without any record of what went wrong. We can get info on which runs failed and why.
     
     """
-    
+
     try:
         fetch_and_save_csv(
             loc_df=loc_df,
@@ -340,7 +335,8 @@ def main():
             url=AQ_URL,
             hourly_vars=HOURLY_VARS,
         )
-        tracker.record_output("air_quality", output_file, HOURLY_VARS, AQ_URL, batch_size) #added by rparaula to log the details of the air quality data fetching to the metadata log, including which variables we fetched, which API endpoint we used, and what batch size we used
+        tracker.record_output("air_quality", output_file, HOURLY_VARS, AQ_URL,
+                              batch_size)  # added by rparaula to log the details of the air quality data fetching to the metadata log, including which variables we fetched, which API endpoint we used, and what batch size we used
 
         # second pass to fetch weather data for the same locations and time range, using the same batching and rate limiting logic
         fetch_and_save_csv(
@@ -353,13 +349,15 @@ def main():
             url=WEATHER_URL,
             hourly_vars=WEATHER_HOURLY_VARS,
         )
-        tracker.record_output("weather", output_file_weather, WEATHER_HOURLY_VARS, WEATHER_URL, batch_size_weather) # added by rparaula to log the details of the weather data fetching to the metadata log, including which variables we fetched, which API endpoint we used, and what batch size we used
+        tracker.record_output("weather", output_file_weather, WEATHER_HOURLY_VARS, WEATHER_URL,
+                              batch_size_weather)  # added by rparaula to log the details of the weather data fetching to the metadata log, including which variables we fetched, which API endpoint we used, and what batch size we used
 
         # added by rparaula to log the status of the run within metadata tracker
         tracker.finish(status="success")
     except Exception as e:
         tracker.finish(status="error", error=str(e))
         raise
+
 
 if __name__ == "__main__":
     main()
