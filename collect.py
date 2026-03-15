@@ -15,19 +15,20 @@ cache_session = requests_cache.CachedSession(".cache", expire_after=3600)
 retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
 openmeteo = openmeteo_requests.Client(session=retry_session)
 
+# Will have to manually switch between forecast and archive endpoints, idk how to implement both
 AQ_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"  # forecast endpoint covers today + recent history (no ~5 day archive lag)
 
 MAX_WEIGHT_PER_MIN = 600.0
-WINDOW_SECONDS = 60
+WINDOW_SECONDS = 60     
 
 HOURLY_VARS = [
     "us_aqi",
     "pm10",
-    "pm2_5",
+    "pm2_5",        
     "carbon_monoxide",
     "nitrogen_dioxide",
-    "sulphur_dioxide",
+    "sulphur_dioxide",          
     "ozone",
     "uv_index_clear_sky",
     "uv_index",
@@ -39,14 +40,14 @@ WEATHER_HOURLY_VARS = [
     "temperature_2m",  # Air temperature at 2 meters above ground
     "relative_humidity_2m",  # Relative humidity at 2 meters above ground
     "precipitation",  # Total precipitation (rain + snow) sum of the preceding hour
-    "wind_speed_10m",  # Wind speed at 10 meters above ground (standard level)
+    "wind_speed_10m",  # Wind speed at 10 meters above ground (standard level)  
     "wind_speed_100m",  # Wind speed at 100 meters above ground (archive-supported; replaces 80m/180m)
-    "wind_direction_10m",  # Wind direction at 10 meters above ground
+    "wind_direction_10m",  # Wind direction at 10 meters above ground       
     "wind_direction_100m",  # Wind direction at 100 meters above ground (archive-supported; replaces 80m/180m)
     "wind_gusts_10m",  # Wind gusts at 10 meters above ground (max of preceding hour)
-    "shortwave_radiation",  # Shortwave solar radiation as average of the preceding hour
+    "shortwave_radiation",  # Shortwave solar radiation as average of the preceding hour        
     "diffuse_radiation",  # Diffuse solar radiation as average of the preceding hour
-    "cloud_cover",  # Total cloud cover as an area fraction
+    "cloud_cover",  # Total cloud cover as an area fraction         
 ]
 
 
@@ -56,17 +57,17 @@ def parse_city_state_list(s: str):
     for part in s.split(";"):
         part = part.strip()
         if not part:
-            continue
+            continue        
         if "," not in part:
             raise ValueError(f"Bad --cities entry '{part}'. Expected 'City,ST' (comma-separated).")
-        city, st = part.split(",", 1)
+        city, st = part.split(",", 1)       
         city = city.strip()
         st = st.strip().upper()
         if not city or not st:
             raise ValueError(f"Bad --cities entry '{part}'. Expected 'City,ST'.")
         pairs.append((city, st))
     if not pairs:
-        raise ValueError("No valid city/state pairs provided in --cities.")
+        raise ValueError("No valid city/state pairs provided in --cities.")         
     return pairs
 
 
@@ -74,47 +75,47 @@ def parse_city_state_list(s: str):
 def get_zip_centroids(city: str, state_id: str, uszips_csv_path: str) -> pd.DataFrame:
     df = pd.read_csv(uszips_csv_path)
 
-    city_norm = city.strip().lower()
+    city_norm = city.strip().lower()        
     state_norm = state_id.strip().upper()
 
     sub = df[
         (df["city"].astype(str).str.strip().str.lower() == city_norm)
-        & (df["state_id"].astype(str).str.strip().str.upper() == state_norm)
+        & (df["state_id"].astype(str).str.strip().str.upper() == state_norm)        
         ][["zip", "lat", "lng"]].copy()
 
     sub = sub.rename(columns={"lat": "latitude", "lng": "longitude"})
-    sub = sub.dropna(subset=["latitude", "longitude"]).drop_duplicates(subset=["zip"]).reset_index(drop=True)
+    sub = sub.dropna(subset=["latitude", "longitude"]).drop_duplicates(subset=["zip"]).reset_index(drop=True)           
 
     return sub
 
 
-class WeightRateLimiter:
+class WeightRateLimiter:        
     """
-    Sliding-window limiter: total weight over the last `window_seconds`
+    Sliding-window limiter: total weight over the last `window_seconds`     
     must not exceed `max_weight`.
     """
 
     def __init__(self, max_weight: float = 600.0, window_seconds: int = 60):
         self.max_weight = float(max_weight)
-        self.window_seconds = int(window_seconds)
+        self.window_seconds = int(window_seconds)       
         self.events = deque()  # (timestamp_monotonic, weight)
 
-    def _prune(self, now: float) -> None:
-        cutoff = now - self.window_seconds
-        while self.events and self.events[0][0] <= cutoff:
+    def _prune(self, now: float) -> None:           
+        cutoff  = now - self.window_seconds
+        while self.events and self.events[0][0] <= cutoff:      
             self.events.popleft()
 
     def used_weight(self) -> float:
-        now = time.monotonic()
-        self._prune(now)
+        now =  time.monotonic()
+        self._prune(now)            
         return sum(w for _, w in self.events)
 
     def acquire(self, weight: float) -> None:
         weight = float(weight)
-        if weight <= 0:
+        if weight <= 0:     
             return
 
-        while True:
+        while True:         
             now = time.monotonic()
             self._prune(now)
 
