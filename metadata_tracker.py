@@ -167,6 +167,40 @@ class PipelineRunTracker:
         print(f"\n[Metadata] Run '{self._record['run_id']}' logged -> {self._metadata_path}")
 
     # ------------------------------------------------------------------
+    # Class-level helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def is_window_already_collected(
+        cls,
+        out_dir: Path,
+        start: str,
+        end: str,
+        script: str = "collect.py",
+    ) -> bool:
+        """Return True if a successful run for this exact date window is already logged."""
+        metadata_path = out_dir / METADATA_FILE
+        if not metadata_path.exists():
+            return False
+        try:
+            records = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if not isinstance(records, list):
+                records = [records]
+        except (json.JSONDecodeError, OSError):
+            return False
+
+        for record in records:
+            params = record.get("parameters", {})
+            if (
+                record.get("script") == script
+                and record.get("status") == "success"
+                and params.get("start_date") == start
+                and params.get("end_date") == end
+            ):
+                return True
+        return False
+
+    # ------------------------------------------------------------------
     # Internal helpers ----->> where did we get these again?
     # ------------------------------------------------------------------
 
@@ -191,3 +225,30 @@ class PipelineRunTracker:
             json.dumps(existing, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+
+
+@classmethod
+def is_window_already_ingested(cls, out_dir: Path, start_date: str, end_date: str) -> bool:
+#Returns True if the given date window has already been ingested in a previous run, based on the metadata log.
+    metadata_path  = out_dir /  METADATA_FILE
+    if not metadata_path.exists():
+        return False
+    try:
+        records = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if not isinstance(records, list):
+            records = [records]
+    except (json.JSONDecodeError, OSError):
+        return False
+    
+    
+    
+    for record in records:
+        params = record.get("parameters", {})
+        if  (
+             record.get("script") ==  "collect.py"
+             and record.get("status") == "success"
+             and  params.get("start_date") == start_date
+             and params.get("end_date") == end_date
+         ):
+                return True
+    return False

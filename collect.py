@@ -16,12 +16,10 @@ retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
 openmeteo = openmeteo_requests.Client(session=retry_session)
 
 AQ_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
-WEATHER_URL = "https://archive-api.open-meteo.com/v1/archive"  # added by rparaula to implement open meteo's weather API
+WEATHER_URL = "https://api.open-meteo.com/v1/forecast"  # forecast endpoint covers today + recent history (no ~5 day archive lag)
 
 MAX_WEIGHT_PER_MIN = 600.0
 WINDOW_SECONDS = 60
-
-# Remember these are for ARCHIVE endpoints, forecast endpoints will be implemented later
 
 HOURLY_VARS = [
     "us_aqi",
