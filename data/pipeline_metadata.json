@@ -5327,5 +5327,78 @@
       }
     ],
     "error": null
+  },
+  {
+    "run_id": "20260612_203437",
+    "script": "collect",
+    "status": "success",
+    "started_at": "2026-06-12T20:34:37.774875",
+    "finished_at": "2026-06-12T20:34:40.710917",
+    "duration_seconds": 2.94,
+    "parameters": {
+      "cities": "Houston,TX",
+      "start_date": "2026-06-07",
+      "end_date": "2026-06-07",
+      "timezone": "America/Chicago",
+      "batch_size": 50,
+      "uszips": "uszips.csv",
+      "zip_traffic": null,
+      "out_dir": "data",
+      "out_prefix": "june_7"
+    },
+    "locations": {
+      "total_zip_centroids": 97,
+      "cities_found": [
+        "Houston,TX"
+      ],
+      "cities_skipped": []
+    },
+    "outputs": [
+      {
+        "type": "air_quality",
+        "file": "data/june_7_air_quality_hourly_20260612_203437.csv",
+        "row_count": 2328,
+        "size_bytes": 275733,
+        "variable_count": 11,
+        "variables": [
+          "us_aqi",
+          "pm10",
+          "pm2_5",
+          "carbon_monoxide",
+          "nitrogen_dioxide",
+          "sulphur_dioxide",
+          "ozone",
+          "uv_index_clear_sky",
+          "uv_index",
+          "dust",
+          "aerosol_optical_depth"
+        ],
+        "api_url": "https://air-quality-api.open-meteo.com/v1/air-quality",
+        "batch_size_used": 50
+      },
+      {
+        "type": "weather",
+        "file": "data/june_7_weather_hourly_20260612_203437.csv",
+        "row_count": 2328,
+        "size_bytes": 331098,
+        "variable_count": 11,
+        "variables": [
+          "temperature_2m",
+          "relative_humidity_2m",
+          "precipitation",
+          "wind_speed_10m",
+          "wind_speed_100m",
+          "wind_direction_10m",
+          "wind_direction_100m",
+          "wind_gusts_10m",
+          "shortwave_radiation",
+          "diffuse_radiation",
+          "cloud_cover"
+        ],
+        "api_url": "https://archive-api.open-meteo.com/v1/archive",
+        "batch_size_used": 50
+      }
+    ],
+    "error": null
   }
 ]
