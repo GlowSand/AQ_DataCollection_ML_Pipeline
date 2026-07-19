@@ -8028,5 +8028,78 @@
       }
     ],
     "error": null
+  },
+  {
+    "run_id": "20260719_193957",
+    "script": "collect",
+    "status": "success",
+    "started_at": "2026-07-19T19:39:57.396141",
+    "finished_at": "2026-07-19T19:40:01.208016",
+    "duration_seconds": 3.81,
+    "parameters": {
+      "cities": "Houston,TX",
+      "start_date": "2026-07-14",
+      "end_date": "2026-07-14",
+      "timezone": "America/Chicago",
+      "batch_size": 50,
+      "uszips": "uszips.csv",
+      "zip_traffic": null,
+      "out_dir": "data",
+      "out_prefix": "july_14"
+    },
+    "locations": {
+      "total_zip_centroids": 97,
+      "cities_found": [
+        "Houston,TX"
+      ],
+      "cities_skipped": []
+    },
+    "outputs": [
+      {
+        "type": "air_quality",
+        "file": "data/july_14_air_quality_hourly_20260719_193957.csv",
+        "row_count": 2328,
+        "size_bytes": 277396,
+        "variable_count": 11,
+        "variables": [
+          "us_aqi",
+          "pm10",
+          "pm2_5",
+          "carbon_monoxide",
+          "nitrogen_dioxide",
+          "sulphur_dioxide",
+          "ozone",
+          "uv_index_clear_sky",
+          "uv_index",
+          "dust",
+          "aerosol_optical_depth"
+        ],
+        "api_url": "https://air-quality-api.open-meteo.com/v1/air-quality",
+        "batch_size_used": 50
+      },
+      {
+        "type": "weather",
+        "file": "data/july_14_weather_hourly_20260719_193957.csv",
+        "row_count": 2328,
+        "size_bytes": 330116,
+        "variable_count": 11,
+        "variables": [
+          "temperature_2m",
+          "relative_humidity_2m",
+          "precipitation",
+          "wind_speed_10m",
+          "wind_speed_100m",
+          "wind_direction_10m",
+          "wind_direction_100m",
+          "wind_gusts_10m",
+          "shortwave_radiation",
+          "diffuse_radiation",
+          "cloud_cover"
+        ],
+        "api_url": "https://archive-api.open-meteo.com/v1/archive",
+        "batch_size_used": 50
+      }
+    ],
+    "error": null
   }
 ]
