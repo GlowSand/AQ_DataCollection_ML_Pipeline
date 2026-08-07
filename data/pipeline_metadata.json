@@ -9342,5 +9342,151 @@
       }
     ],
     "error": null
+  },
+  {
+    "run_id": "20260807_002257",
+    "script": "collect",
+    "status": "success",
+    "started_at": "2026-08-07T00:22:57.651383",
+    "finished_at": "2026-08-07T00:23:02.536153",
+    "duration_seconds": 4.88,
+    "parameters": {
+      "cities": "Houston,TX",
+      "start_date": "2026-08-01",
+      "end_date": "2026-08-01",
+      "timezone": "America/Chicago",
+      "batch_size": 50,
+      "uszips": "uszips.csv",
+      "zip_traffic": null,
+      "out_dir": "data",
+      "out_prefix": "august_1"
+    },
+    "locations": {
+      "total_zip_centroids": 97,
+      "cities_found": [
+        "Houston,TX"
+      ],
+      "cities_skipped": []
+    },
+    "outputs": [
+      {
+        "type": "air_quality",
+        "file": "data/august_1_air_quality_hourly_20260807_002257.csv",
+        "row_count": 2328,
+        "size_bytes": 270841,
+        "variable_count": 11,
+        "variables": [
+          "us_aqi",
+          "pm10",
+          "pm2_5",
+          "carbon_monoxide",
+          "nitrogen_dioxide",
+          "sulphur_dioxide",
+          "ozone",
+          "uv_index_clear_sky",
+          "uv_index",
+          "dust",
+          "aerosol_optical_depth"
+        ],
+        "api_url": "https://air-quality-api.open-meteo.com/v1/air-quality",
+        "batch_size_used": 50
+      },
+      {
+        "type": "weather",
+        "file": "data/august_1_weather_hourly_20260807_002257.csv",
+        "row_count": 2328,
+        "size_bytes": 330838,
+        "variable_count": 11,
+        "variables": [
+          "temperature_2m",
+          "relative_humidity_2m",
+          "precipitation",
+          "wind_speed_10m",
+          "wind_speed_100m",
+          "wind_direction_10m",
+          "wind_direction_100m",
+          "wind_gusts_10m",
+          "shortwave_radiation",
+          "diffuse_radiation",
+          "cloud_cover"
+        ],
+        "api_url": "https://archive-api.open-meteo.com/v1/archive",
+        "batch_size_used": 50
+      }
+    ],
+    "error": null
+  },
+  {
+    "run_id": "20260807_002303",
+    "script": "collect",
+    "status": "success",
+    "started_at": "2026-08-07T00:23:03.120813",
+    "finished_at": "2026-08-07T00:23:05.215488",
+    "duration_seconds": 2.09,
+    "parameters": {
+      "cities": "Houston,TX",
+      "start_date": "2026-08-02",
+      "end_date": "2026-08-02",
+      "timezone": "America/Chicago",
+      "batch_size": 50,
+      "uszips": "uszips.csv",
+      "zip_traffic": null,
+      "out_dir": "data",
+      "out_prefix": "august_2"
+    },
+    "locations": {
+      "total_zip_centroids": 97,
+      "cities_found": [
+        "Houston,TX"
+      ],
+      "cities_skipped": []
+    },
+    "outputs": [
+      {
+        "type": "air_quality",
+        "file": "data/august_2_air_quality_hourly_20260807_002303.csv",
+        "row_count": 2328,
+        "size_bytes": 275182,
+        "variable_count": 11,
+        "variables": [
+          "us_aqi",
+          "pm10",
+          "pm2_5",
+          "carbon_monoxide",
+          "nitrogen_dioxide",
+          "sulphur_dioxide",
+          "ozone",
+          "uv_index_clear_sky",
+          "uv_index",
+          "dust",
+          "aerosol_optical_depth"
+        ],
+        "api_url": "https://air-quality-api.open-meteo.com/v1/air-quality",
+        "batch_size_used": 50
+      },
+      {
+        "type": "weather",
+        "file": "data/august_2_weather_hourly_20260807_002303.csv",
+        "row_count": 2328,
+        "size_bytes": 328915,
+        "variable_count": 11,
+        "variables": [
+          "temperature_2m",
+          "relative_humidity_2m",
+          "precipitation",
+          "wind_speed_10m",
+          "wind_speed_100m",
+          "wind_direction_10m",
+          "wind_direction_100m",
+          "wind_gusts_10m",
+          "shortwave_radiation",
+          "diffuse_radiation",
+          "cloud_cover"
+        ],
+        "api_url": "https://archive-api.open-meteo.com/v1/archive",
+        "batch_size_used": 50
+      }
+    ],
+    "error": null
   }
 ]
